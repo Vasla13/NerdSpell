@@ -5,13 +5,15 @@
     "version": "2.0",
     "description": "Corrige les fautes de français et affiche un message '☝️🤓 Erm, arckchually...' pour aider à l'orthographe.",
     "host_permissions": [
-        "https://raw.githubusercontent.com/*"
+      "https://raw.githubusercontent.com/*"
     ],
     "content_scripts": [
-        {
-            "matches": ["<all_urls>"],
-            "js": ["content/main.js"],
-            "run_at": "document_end"
-        }
+      {
+        "matches": ["<all_urls>"],
+        "js": ["content/main.js"],
+        "run_at": "document_end",
+        "type": "module"
+      }
     ]
-}
+  }
+  
