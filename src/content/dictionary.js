@@ -1,12 +1,13 @@
-// URL du dictionnaire de fréquence des mots
+import { cleanWord } from './morphology.js';
+
 const DICTIONARY_URL = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2016/fr/fr_50k.txt";
 
 let dictionary = [];
 let dictionarySet = null;
-let isDictionaryLoaded = false;
+let dictionaryLoaded = false;
 
 // Fonction pour charger le dictionnaire
-async function loadDictionary() {
+export async function loadDictionary() {
     try {
         const response = await fetch(DICTIONARY_URL);
         const text = await response.text();
@@ -21,26 +22,67 @@ async function loadDictionary() {
         }
         dictionary = temp;
         dictionarySet = new Set(temp.map(item => item.word));
-        isDictionaryLoaded = true;
+        dictionaryLoaded = true;
         console.log("[ArckchuallyCorrector] Dictionnaire chargé:", dictionary.length, "mots.");
     } catch (err) {
         console.error("[ArckchuallyCorrector] Erreur chargement dictionnaire:", err);
     }
 }
 
-// Vérifie si le dictionnaire est chargé
-function isDictionaryLoaded() {
-    return isDictionaryLoaded;
+export function isDictionaryLoaded() {
+    return dictionaryLoaded;
 }
 
-// Retourne le dictionnaire
-function getDictionary() {
+export function getDictionary() {
     return dictionary;
 }
 
-// Retourne l'ensemble des mots du dictionnaire
-function getDictionarySet() {
+export function getDictionarySet() {
     return dictionarySet;
 }
 
-export { loadDictionary, isDictionaryLoaded, getDictionary, getDictionarySet };
+// Fonction utilitaire : calcule la distance de Levenshtein entre deux chaînes
+function levenshteinDistance(a, b) {
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) {
+        matrix[i] = [i];
+    }
+    for (let j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+    }
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1, // substitution
+                    matrix[i][j - 1] + 1,       // insertion
+                    matrix[i - 1][j] + 1        // suppression
+                );
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
+// Fonction pour trouver une suggestion pour un mot mal orthographié
+export function findSingleSuggestion(word) {
+    const cleaned = cleanWord(word);
+    if (!dictionarySet) return null;
+    let suggestion = null;
+    let minDistance = Infinity;
+    for (const entry of dictionary) {
+        const candidate = entry.word;
+        const distance = levenshteinDistance(cleaned, candidate);
+        if (distance < minDistance) {
+            minDistance = distance;
+            suggestion = candidate;
+        }
+    }
+    // Retourne la suggestion seulement si la distance minimale est raisonnable (ici ≤ 2)
+    if (minDistance <= 2) {
+        return suggestion;
+    }
+    return null;
+}

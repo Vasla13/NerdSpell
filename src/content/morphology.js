@@ -1,4 +1,3 @@
-// Fonction pour nettoyer un mot des caractères spéciaux
 export function cleanWord(w) {
     return w
         .replace(/[.,!?;:"()«»']/g, "")
@@ -7,7 +6,6 @@ export function cleanWord(w) {
         .toLowerCase();
 }
 
-// Fonction pour obtenir les bases morphologiques d'un mot
 export function getMorphologicalBases(cw) {
     const bases = [cw];
 
@@ -25,4 +23,15 @@ export function getMorphologicalBases(cw) {
     }
 
     return Array.from(new Set(bases));
+}
+
+// Vérifie si un mot est valide en tenant compte de ses bases morphologiques
+export function isWordValidWithMorphology(word, dictionarySet) {
+    const cleaned = cleanWord(word);
+    if (dictionarySet.has(cleaned)) return true;
+    const bases = getMorphologicalBases(cleaned);
+    for (const base of bases) {
+        if (dictionarySet.has(base)) return true;
+    }
+    return false;
 }

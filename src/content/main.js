@@ -1,6 +1,4 @@
-// filepath: ArckchuallyCorrector/ArckchuallyCorrector/src/content/main.js
-import { loadDictionary } from './dictionary.js';
-import { cleanWord, getMorphologicalBases } from './morphology.js';
+import { loadDictionary, getDictionarySet } from './dictionary.js';
 import { showErrorPopup, removeErrorPopup } from './popup.js';
 import { checkText } from './textCheck.js';
 
@@ -19,7 +17,7 @@ loadDictionary().then(() => {
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
                 const text = (el.value !== undefined) ? el.value : el.innerText;
-                const foundErrors = checkText(text);
+                const foundErrors = checkText(text, getDictionarySet());
                 if (foundErrors.length > 0) {
                     showErrorPopup(el, foundErrors);
                 } else {

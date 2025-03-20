@@ -1,19 +1,19 @@
 {
     "compilerOptions": {
-        "target": "es6", // Version cible de JavaScript
-        "module": "commonjs", // Système de module
-        "strict": true, // Activer les vérifications strictes
-        "esModuleInterop": true, // Interopérabilité avec les modules ES
-        "skipLibCheck": true, // Ignorer la vérification des fichiers de définition
-        "forceConsistentCasingInFileNames": true, // Forcer la casse cohérente dans les noms de fichiers
-        "outDir": "./dist", // Répertoire de sortie
-        "rootDir": "./src" // Répertoire racine
+        "target": "es6",
+        "module": "commonjs",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "outDir": "./dist",
+        "rootDir": "./src"
     },
     "include": [
-        "src/**/*" // Inclure tous les fichiers dans src
+        "src/**/*"
     ],
     "exclude": [
-        "node_modules", // Exclure le répertoire node_modules
-        "**/*.spec.ts" // Exclure les fichiers de test
+        "node_modules",
+        "**/*.spec.ts"
     ]
 }

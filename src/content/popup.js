@@ -1,4 +1,3 @@
-// Fonction pour échapper les caractères HTML
 function escapeHtml(str) {
     return str.replace(/[<>&"]/g, function(c) {
         switch (c) {
@@ -11,7 +10,6 @@ function escapeHtml(str) {
     });
 }
 
-// Afficher une popup d'erreur
 function showErrorPopup(element, errors) {
     let popup = element._arckchuallyPopup;
     if (!popup) {
@@ -81,7 +79,6 @@ function showErrorPopup(element, errors) {
     popup.style.left = rect.left + "px";
 }
 
-// Supprimer la popup d'erreur
 function removeErrorPopup(element) {
     if (element._arckchuallyPopup) {
         element._arckchuallyPopup.remove();
