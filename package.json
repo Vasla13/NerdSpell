@@ -4,12 +4,17 @@
   "description": "Une extension Chrome qui corrige les fautes d'orthographe en français et fournit des suggestions.",
   "main": "src/content/main.js",
   "scripts": {
-    "build": "tsc",
-    "start": "npm run build && open src/content/main.js"
+    "build": "webpack --mode production",
+    "start": "npm run build && open dist"
   },
   "dependencies": {},
   "devDependencies": {
-    "typescript": "^4.0.0"
+    "webpack": "^5.76.0",
+    "webpack-cli": "^4.10.0",
+    "copy-webpack-plugin": "^11.0.0",
+    "babel-loader": "^9.1.2",
+    "@babel/core": "^7.20.12",
+    "@babel/preset-env": "^7.20.2"
   },
   "keywords": [
     "chrome",
