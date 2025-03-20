@@ -1,0 +1,22 @@
+{
+  "name": "arckchually-corrector",
+  "version": "2.0.0",
+  "description": "Une extension Chrome qui corrige les fautes d'orthographe en français et fournit des suggestions.",
+  "main": "src/content/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && open src/content/main.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^4.0.0"
+  },
+  "keywords": [
+    "chrome",
+    "extension",
+    "spell-check",
+    "french"
+  ],
+  "author": "Ryan Chaos",
+  "license": "MIT"
+}
