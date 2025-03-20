@@ -1,0 +1,17 @@
+{
+    "manifest_version": 3, // Version du manifeste
+    "name": "Arckchually Corrector", // Nom de l'extension
+    "short_name": "Arckchually", // Nom court de l'extension
+    "version": "2.0", // Version de l'extension
+    "description": "Corrige les fautes de français et affiche un message '☝️🤓 Erm, arckchually...' pour aider à l'orthographe.", // Description de l'extension
+    "host_permissions": [
+        "https://raw.githubusercontent.com/*" // Permissions d'hôte
+    ],
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"], // URL correspondantes
+            "js": ["content/main.js"], // Fichier JavaScript à exécuter
+            "run_at": "document_end" // Moment d'exécution du script
+        }
+    ]
+}
