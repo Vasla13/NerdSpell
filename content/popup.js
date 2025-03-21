@@ -10,7 +10,7 @@ function escapeHtml(str) {
     });
   }
   
-  function showErrorPopup(element, errors) {
+  function afficherPopupErreur(element, erreurs) {
     let popup = element._arckchuallyPopup;
     if (!popup) {
       popup = document.createElement("div");
@@ -49,10 +49,8 @@ function escapeHtml(str) {
       popup.appendChild(messageDiv);
   
       popup.addEventListener("click", (ev) => {
-        const tgt = ev.target;
-        if (tgt.dataset.action === "close-popup") {
-          removeErrorPopup(element);
-          return;
+        if (ev.target.dataset.action === "close-popup") {
+          supprimerPopupErreur(element);
         }
       });
   
@@ -63,28 +61,28 @@ function escapeHtml(str) {
     const msgDiv = popup.querySelector("[data-role='message']");
     if (!msgDiv) return;
   
-    const lines = [];
-    lines.push("☝️🤓 Erm, arckchually…");
-    for (const e of errors) {
+    const lignes = [];
+    lignes.push("☝️🤓 Erm, arckchually…");
+    for (const e of erreurs) {
       if (!e.suggestion) {
-        lines.push(`  - le mot « ${escapeHtml(e.wrong)} » n'existe pas ou n'est pas reconnu.`);
+        lignes.push(`  - Le mot « ${escapeHtml(e.wrong)} » n'existe pas ou n'est pas reconnu.`);
       } else {
-        lines.push(`  - c’est « ${escapeHtml(e.suggestion)} », pas « ${escapeHtml(e.wrong)} ».`);
+        lignes.push(`  - C'est « ${escapeHtml(e.suggestion)} », pas « ${escapeHtml(e.wrong)} ».`);
       }
     }
-    msgDiv.innerHTML = lines.join("<br/>");
+    msgDiv.innerHTML = lignes.join("<br/>");
   
     const rect = element.getBoundingClientRect();
     popup.style.top = (rect.bottom + 5) + "px";
     popup.style.left = rect.left + "px";
   }
   
-  function removeErrorPopup(element) {
+  function supprimerPopupErreur(element) {
     if (element._arckchuallyPopup) {
       element._arckchuallyPopup.remove();
       delete element._arckchuallyPopup;
     }
   }
   
-  export { showErrorPopup, removeErrorPopup };
+  export { afficherPopupErreur, supprimerPopupErreur };
   

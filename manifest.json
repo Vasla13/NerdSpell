@@ -3,15 +3,16 @@
     "name": "Arckchually Corrector",
     "short_name": "Arckchually",
     "version": "2.0",
-    "description": "Corrige les fautes de français et affiche un message '☝️🤓 Erm, arckchually...' pour aider à l'orthographe.",
+    "description": "Corrige les fautes d'orthographe en français et affiche un message '☝️🤓 Erm, arckchually…' pour aider à l'orthographe.",
     "host_permissions": [
       "https://raw.githubusercontent.com/*"
     ],
     "content_scripts": [
       {
         "matches": ["<all_urls>"],
-        "js": ["bundle.js"],
-        "run_at": "document_end"
+        "js": ["content/main.js"],
+        "run_at": "document_end",
+        "type": "module"
       }
     ]
   }
