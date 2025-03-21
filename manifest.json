@@ -4,6 +4,7 @@
     "short_name": "Arckchually",
     "version": "2.1",
     "description": "Corrige les fautes d'orthographe en français, y compris avec apostrophes.",
+    "author": "vasla et Ryan Chaos",
     "host_permissions": [
       "https://raw.githubusercontent.com/*"
     ],
