@@ -1,36 +1,44 @@
-/**********************************************
- *      Arckchually Corrector - Complet
- *      Version sans import/export
- **********************************************/
-
 // ==================== Dictionnaire ====================
 
-// URL du dictionnaire de 50k mots français (hermitdave)
 const DICTIONNAIRE_URL = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2016/fr/fr_50k.txt";
 
-// Variables globales pour le dictionnaire
 let dictionnaire = [];
 let dictionnaireSet = null;
 let dictionnaireCharge = false;
 
+// Petit cache pour accélérer la recherche de suggestions
+let suggestionsCache = Object.create(null);
+
 /**
- * Nettoie une chaîne (retire la ponctuation, normalise, etc.)
- * @param {string} w
- * @returns {string}
+ * Nettoie une chaîne (retire la ponctuation, normalise, etc.),
+ * mais ne supprime PAS l'apostrophe pour pouvoir gérer les contractions.
  */
 function cleanWord(w) {
   return w
-    .replace(/[.,!?;:"()«»']/g, "")
+    // On ne retire pas ' ni ’
+    .replace(/[.,!?;:"()«»]/g, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 }
 
 /**
- * Calcule la distance de Levenshtein entre deux chaînes
- * @param {string} a
- * @param {string} b
- * @returns {number}
+ * Supprime la partie contractée au début du mot.
+ * Ex : j'aimerais -> aimerais, l'ami -> ami, d'accord -> accord, qu'il -> il, etc.
+ */
+function removeLeadingApostrophe(word) {
+  // On gère les cas courants de contraction en français
+  // (et on tolère l’apostrophe ASCII ' ou typographique ’)
+  const match = word.match(/^(l|j|t|s|qu|c|n|m|d)(?:'|’)(.*)$/i);
+  if (match) {
+    // match[2] = le reste du mot après l'apostrophe
+    return match[2];
+  }
+  return word;
+}
+
+/**
+ * Distance de Levenshtein (pour la suggestion)
  */
 function distanceLevenshtein(a, b) {
   const matrice = [];
@@ -46,9 +54,9 @@ function distanceLevenshtein(a, b) {
         matrice[i][j] = matrice[i - 1][j - 1];
       } else {
         matrice[i][j] = Math.min(
-          matrice[i - 1][j - 1] + 1, // substitution
-          matrice[i][j - 1] + 1,     // insertion
-          matrice[i - 1][j] + 1      // suppression
+          matrice[i - 1][j - 1] + 1,
+          matrice[i][j - 1] + 1,
+          matrice[i - 1][j] + 1
         );
       }
     }
@@ -57,11 +65,11 @@ function distanceLevenshtein(a, b) {
 }
 
 /**
- * Charge le dictionnaire à partir d'une URL distante
+ * Charge le dictionnaire (50k mots) depuis GitHub
  */
 function chargerDictionnaire() {
   return fetch(DICTIONNAIRE_URL)
-    .then((reponse) => reponse.text())
+    .then((res) => res.text())
     .then((texte) => {
       const lignes = texte.split(/\r?\n/);
       const temp = [];
@@ -69,8 +77,7 @@ function chargerDictionnaire() {
         if (!ligne.trim()) continue;
         const [motBrut, freqStr] = ligne.split(/\s+/);
         if (!motBrut) continue;
-        const freq = parseInt(freqStr, 10) || 0;
-        temp.push({ mot: motBrut.toLowerCase(), freq });
+        temp.push({ mot: motBrut.toLowerCase(), freq: parseInt(freqStr, 10) || 0 });
       }
       dictionnaire = temp;
       dictionnaireSet = new Set(temp.map((item) => item.mot));
@@ -78,49 +85,50 @@ function chargerDictionnaire() {
       console.log("[ArckchuallyCorrector] Dictionnaire chargé :", dictionnaire.length, "mots.");
     })
     .catch((err) => {
-      console.error("[ArckchuallyCorrector] Erreur lors du chargement du dictionnaire :", err);
+      console.error("[ArckchuallyCorrector] Erreur chargement dictionnaire :", err);
     });
 }
 
 /**
- * Renvoie true si le dictionnaire est chargé
- * @returns {boolean}
- */
-function estDictionnaireCharge() {
-  return dictionnaireCharge;
-}
-
-/**
- * Renvoie une suggestion (distance de Levenshtein ≤ 2) pour un mot mal orthographié
- * @param {string} mot
- * @returns {string|null}
+ * Suggestion de correction pour un mot mal orthographié
+ * (distance de Levenshtein <= 2, filtrage par longueur)
  */
 function trouverSuggestion(mot) {
   const motNettoye = cleanWord(mot);
   if (!dictionnaireSet) return null;
+
+  if (suggestionsCache[motNettoye] !== undefined) {
+    return suggestionsCache[motNettoye];
+  }
+
   let suggestion = null;
   let distanceMin = Infinity;
+
   for (const entree of dictionnaire) {
     const candidat = entree.mot;
-    const distance = distanceLevenshtein(motNettoye, candidat);
-    if (distance < distanceMin) {
-      distanceMin = distance;
+    if (Math.abs(candidat.length - motNettoye.length) > 2) {
+      continue; // trop de différence de longueur, la distance sera > 2
+    }
+    const dist = distanceLevenshtein(motNettoye, candidat);
+    if (dist < distanceMin) {
+      distanceMin = dist;
       suggestion = candidat;
+      if (distanceMin === 0) break;
     }
   }
-  // On ne propose une suggestion que si elle est "assez proche" (≤ 2)
+
   if (distanceMin <= 2) {
+    suggestionsCache[motNettoye] = suggestion;
     return suggestion;
   }
+  suggestionsCache[motNettoye] = null;
   return null;
 }
 
 // ==================== Morphologie ====================
 
 /**
- * Renvoie les bases morphologiques d'un mot (ex : singulier -> pluriel)
- * @param {string} cw
- * @returns {string[]}
+ * Renvoie les bases morphologiques d'un mot (singulier/pluriel/terminaisons)
  */
 function getMorphologicalBases(cw) {
   const bases = [cw];
@@ -140,28 +148,37 @@ function getMorphologicalBases(cw) {
 }
 
 /**
- * Vérifie si un mot est valide en tenant compte de ses bases morphologiques
- * @param {string} mot
- * @param {Set<string>} dicoSet
- * @returns {boolean}
+ * Vérifie si un mot est valide en tenant compte de la morphologie
+ * + gestion des apostrophes (contrations françaises)
  */
 function estMotValideAvecMorphologie(mot, dicoSet) {
   const motNettoye = cleanWord(mot);
+
+  // 1) Test direct
   if (dicoSet.has(motNettoye)) return true;
   const bases = getMorphologicalBases(motNettoye);
   for (const base of bases) {
     if (dicoSet.has(base)) return true;
   }
+
+  // 2) Si pas trouvé, test sans la contraction (ex : j'aimerais -> aimerais)
+  const motSansContr = removeLeadingApostrophe(motNettoye);
+  if (motSansContr !== motNettoye) {
+    if (dicoSet.has(motSansContr)) return true;
+    const basesContr = getMorphologicalBases(motSansContr);
+    for (const base of basesContr) {
+      if (dicoSet.has(base)) return true;
+    }
+  }
+
+  // Rien trouvé
   return false;
 }
 
 // ==================== Vérification du texte ====================
 
 /**
- * Vérifie le texte, détecte les mots non valides et propose une suggestion
- * @param {string} texte
- * @param {Set<string>} dicoSet
- * @returns {Array<{wrong: string, suggestion: string|null}>}
+ * Vérifie tout le texte et retourne les erreurs
  */
 function verifierTexte(texte, dicoSet) {
   const tokens = texte.split(/\s+/);
@@ -169,7 +186,6 @@ function verifierTexte(texte, dicoSet) {
   for (const token of tokens) {
     const motNettoye = cleanWord(token);
     if (!motNettoye) continue;
-    // Si le mot n'est pas dans le dictionnaire (même avec morphologie), c'est une erreur
     if (!estMotValideAvecMorphologie(token, dicoSet)) {
       const suggestion = trouverSuggestion(token);
       erreurs.push({ wrong: token, suggestion });
@@ -180,11 +196,6 @@ function verifierTexte(texte, dicoSet) {
 
 // ==================== Popup ====================
 
-/**
- * Sécurise l'affichage HTML pour éviter les caractères spéciaux
- * @param {string} str
- * @returns {string}
- */
 function escapeHtml(str) {
   return str.replace(/[<>&"]/g, function(c) {
     switch (c) {
@@ -197,11 +208,6 @@ function escapeHtml(str) {
   });
 }
 
-/**
- * Affiche une popup d'erreur avec les mots mal orthographiés et leurs suggestions
- * @param {HTMLElement} element
- * @param {Array<{wrong: string, suggestion: string|null}>} erreurs
- */
 function afficherPopupErreur(element, erreurs) {
   let popup = element._arckchuallyPopup;
   if (!popup) {
@@ -269,10 +275,6 @@ function afficherPopupErreur(element, erreurs) {
   popup.style.left = rect.left + "px";
 }
 
-/**
- * Supprime la popup d'erreur si elle existe
- * @param {HTMLElement} element
- */
 function supprimerPopupErreur(element) {
   if (element._arckchuallyPopup) {
     element._arckchuallyPopup.remove();
@@ -285,14 +287,9 @@ function supprimerPopupErreur(element) {
 const DELAI_DEBOUNCE = 600;
 let timerDebounce = null;
 
-/**
- * Initialisation principale : on charge le dictionnaire, puis on écoute les événements
- */
 chargerDictionnaire().then(() => {
-  // Quand le dictionnaire est prêt, on ajoute des écouteurs
   document.addEventListener("input", (e) => {
     const element = e.target;
-    // On ne s'intéresse qu'aux INPUT, TEXTAREA et éléments contentEditable
     if (
       element.tagName === "INPUT" ||
       element.tagName === "TEXTAREA" ||
@@ -311,7 +308,6 @@ chargerDictionnaire().then(() => {
     }
   }, true);
 
-  // Quand on quitte un champ (blur), on supprime la popup
   document.addEventListener("blur", (e) => {
     supprimerPopupErreur(e.target);
   }, true);
