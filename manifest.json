@@ -2,8 +2,8 @@
     "manifest_version": 3,
     "name": "Arckchually Corrector",
     "short_name": "Arckchually",
-    "version": "2.1",
-    "description": "Corrige les fautes d'orthographe en français, y compris avec apostrophes.",
+    "version": "3.0",
+    "description": "Corrige les fautes d'orthographe en français, y compris avec apostrophes, avec BK-Tree.",
     "author": "vasla et Ryan Chaos",
     "host_permissions": [
       "https://raw.githubusercontent.com/*"
