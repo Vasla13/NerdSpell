@@ -1,19 +1,22 @@
 {
-    "manifest_version": 3,
-    "name": "Arckchually Corrector",
-    "short_name": "Arckchually",
-    "version": "3.0",
-    "description": "Corrige les fautes d'orthographe en français, y compris avec apostrophes, avec BK-Tree.",
-    "author": "vasla et Ryan Chaos",
-    "host_permissions": [
-      "https://raw.githubusercontent.com/*"
-    ],
-    "content_scripts": [
-      {
-        "matches": ["<all_urls>"],
-        "js": ["content_script.js"],
-        "run_at": "document_end"
-      }
-    ]
-  }
-  
+  "manifest_version": 3,
+  "name": "Arckchually Corrector Pro",
+  "short_name": "Arckchually",
+  "version": "4.0",
+  "description": "Correcteur avancé (BK-Tree, Dico Perso, Rich Text).",
+  "author": "vasla",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["fr_50k.txt"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

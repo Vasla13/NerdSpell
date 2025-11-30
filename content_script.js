@@ -1,51 +1,50 @@
 /******************************************************
- *   Arckchually Corrector - Version BK-Tree Optimisée
- *   (Tout-en-un, Manifest V3, sans import/export)
+ * Arckchually Corrector - Version 4.0 "Pro"
+ * (Tout-en-un : Cache, Dico Perso, Rich Text)
  ******************************************************/
 
 /******************************************************
- *                      CONFIG
+ * CONFIG
  ******************************************************/
-const DICTIONNAIRE_URL = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2016/fr/fr_50k.txt";
+const DICTIONNAIRE_URL = chrome.runtime.getURL("fr_50k.txt");
 const DELAI_DEBOUNCE = 600;
-const DISTANCE_MAX = 2;  // distance de Levenshtein max pour la suggestion
+const DISTANCE_MAX = 2;
 
 /******************************************************
- *         GESTION DU DICTIONNAIRE ET BK-TREE
+ * ÉTAT GLOBAL ET CACHE
  ******************************************************/
-// Notre BK-Tree
 let bkTree = null;
-
-// Variables globales
-let dictionnaireSet = null;
+let dictionnaireSet = null; // Mots valides (incluant dico perso)
+let dicoPersoSet = new Set(); // Mots ignorés par l'utilisateur
 let dictionnaireCharge = false;
-
-// Cache des suggestions pour éviter de rechercher 2 fois le même mot
 let suggestionsCache = Object.create(null);
+let timerDebounce = null;
 
-/**
- * Calcule la distance de Levenshtein entre deux chaînes
- * @param {string} a
- * @param {string} b
- * @returns {number}
- */
+/******************************************************
+ * UTILITAIRES TEXTE & LEVENSHTEIN
+ ******************************************************/
+
+function cleanWord(w) {
+  return w
+    .replace(/[.,!?;:"()«»]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Enlève les accents pour la comparaison
+    .toLowerCase();
+}
+
 function distanceLevenshtein(a, b) {
   const matrice = [];
-  for (let i = 0; i <= b.length; i++) {
-    matrice[i] = [i];
-  }
-  for (let j = 0; j <= a.length; j++) {
-    matrice[0][j] = j;
-  }
+  for (let i = 0; i <= b.length; i++) matrice[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrice[0][j] = j;
   for (let i = 1; i <= b.length; i++) {
     for (let j = 1; j <= a.length; j++) {
       if (b.charAt(i - 1) === a.charAt(j - 1)) {
         matrice[i][j] = matrice[i - 1][j - 1];
       } else {
         matrice[i][j] = Math.min(
-          matrice[i - 1][j - 1] + 1, // substitution
-          matrice[i][j - 1] + 1,     // insertion
-          matrice[i - 1][j] + 1      // suppression
+          matrice[i - 1][j - 1] + 1,
+          matrice[i][j - 1] + 1,
+          matrice[i - 1][j] + 1
         );
       }
     }
@@ -54,78 +53,35 @@ function distanceLevenshtein(a, b) {
 }
 
 /******************************************************
- *                BK-TREE IMPLEMENTATION
+ * BK-TREE (Structure)
  ******************************************************/
-
-/**
- * Structure d'un nœud de BK-Tree :
- * {
- *   word: string,
- *   children: { [dist: number]: BKTreeNode } // mapping distance->enfant
- * }
- */
-
-/**
- * Crée un nouveau nœud BK-Tree
- * @param {string} mot
- * @returns {object} BKTreeNode
- */
 function creerNoeudBK(mot) {
-  return {
-    word: mot,
-    children: {}
-  };
+  return { word: mot, children: {} };
 }
 
-/**
- * Insère un mot dans la BK-Tree
- * @param {object} node - racine ou sous-racine
- * @param {string} mot
- */
 function insererBK(node, mot) {
   const dist = distanceLevenshtein(mot, node.word);
-  // S'il existe déjà un enfant à cette distance, on descend
   if (node.children[dist]) {
     insererBK(node.children[dist], mot);
   } else {
-    // Sinon, on crée un nouveau nœud enfant
     node.children[dist] = creerNoeudBK(mot);
   }
 }
 
-/**
- * Construit la BK-Tree à partir d'un tableau de mots
- * @param {string[]} mots
- * @returns {object|null} Racine de la BK-Tree
- */
 function construireBKTree(mots) {
   if (!mots || mots.length === 0) return null;
-  // On prend le premier mot comme racine
   const racine = creerNoeudBK(mots[0]);
-  // On insère tous les autres
   for (let i = 1; i < mots.length; i++) {
     insererBK(racine, mots[i]);
   }
   return racine;
 }
 
-/**
- * Recherche dans la BK-Tree tous les mots à distance <= threshold
- * @param {object} node - nœud courant
- * @param {string} mot
- * @param {number} threshold
- * @param {string[]} result - accumulation des résultats
- */
 function rechercherBK(node, mot, threshold, result) {
   if (!node) return;
   const distCourante = distanceLevenshtein(mot, node.word);
+  if (distCourante <= threshold) result.push(node.word);
 
-  // Si la distance est dans la limite, on ajoute le mot
-  if (distCourante <= threshold) {
-    result.push(node.word);
-  }
-
-  // On ne descend que dans la fourchette [distCourante - threshold, distCourante + threshold]
   const minRange = distCourante - threshold;
   const maxRange = distCourante + threshold;
 
@@ -138,123 +94,139 @@ function rechercherBK(node, mot, threshold, result) {
 }
 
 /******************************************************
- *       CHARGER LE DICTIONNAIRE ET CONSTRUIRE LA BK-TREE
+ * CHARGEMENT (Optimisé avec Cache Storage)
  ******************************************************/
 
-/**
- * Nettoie un mot : retire ponctuation (sauf apostrophes), normalise, toLowerCase
- * @param {string} w
- * @returns {string}
- */
-function cleanWord(w) {
-  return w
-    .replace(/[.,!?;:"()«»]/g, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
+async function initialiserTout() {
+  console.time("Init Arckchually");
 
-/**
- * Charge le dictionnaire depuis l'URL, construit le Set et la BK-Tree
- */
-function chargerDictionnaire() {
-  return fetch(DICTIONNAIRE_URL)
-    .then((res) => res.text())
-    .then((texte) => {
-      const lignes = texte.split(/\r?\n/);
-      // On stocke les mots nettoyés
-      const motsNettoyes = [];
-      for (const ligne of lignes) {
-        if (!ligne.trim()) continue;
-        const [motBrut] = ligne.split(/\s+/);
-        if (!motBrut) continue;
-        const motLower = motBrut.toLowerCase();
-        motsNettoyes.push(motLower);
+  // 1. Charger le dictionnaire personnel
+  await chargerDicoPerso();
+
+  // 2. Vérifier si on a une version pré-traitée des mots en cache
+  // On ne stocke pas l'arbre (trop complexe à sérialiser), mais la liste propre.
+  // Cela économise le fetch et le regex cleaning.
+  const cacheKey = "arckchually_words_cache_v2";
+
+  chrome.storage.local.get([cacheKey], async (result) => {
+    let motsNettoyes = result[cacheKey];
+
+    if (
+      motsNettoyes &&
+      Array.isArray(motsNettoyes) &&
+      motsNettoyes.length > 1000
+    ) {
+      console.log("[Arckchually] Chargement depuis le cache local...");
+    } else {
+      console.log(
+        "[Arckchually] Cache vide, téléchargement du dictionnaire..."
+      );
+      try {
+        const response = await fetch(DICTIONNAIRE_URL);
+        const texte = await response.text();
+        motsNettoyes = [];
+        const lignes = texte.split(/\r?\n/);
+        for (const ligne of lignes) {
+          if (!ligne.trim()) continue;
+          const [motBrut] = ligne.split(/\s+/);
+          if (motBrut) motsNettoyes.push(cleanWord(motBrut));
+        }
+        // Sauvegarder dans le cache pour la prochaine fois
+        chrome.storage.local.set({ [cacheKey]: motsNettoyes });
+      } catch (e) {
+        console.error("Erreur chargement dictionnaire", e);
+        return;
       }
+    }
 
-      // Construire le Set pour les vérifications directes
-      dictionnaireSet = new Set(motsNettoyes);
+    // Reconstruction de l'arbre et du Set (Rapide en JS pur)
+    dictionnaireSet = new Set(motsNettoyes);
+    bkTree = construireBKTree(motsNettoyes);
+    dictionnaireCharge = true;
+    console.timeEnd("Init Arckchually");
+  });
+}
 
-      // Construire la BK-Tree
-      console.time("Construction BK-Tree");
-      bkTree = construireBKTree(motsNettoyes);
-      console.timeEnd("Construction BK-Tree");
-
-      dictionnaireCharge = true;
-      console.log("[ArckchuallyCorrector] Dictionnaire chargé :", motsNettoyes.length, "mots.");
-    })
-    .catch((err) => {
-      console.error("[ArckchuallyCorrector] Erreur lors du chargement du dictionnaire :", err);
+// Gestion du Dico Perso
+function chargerDicoPerso() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["arckchually_personal_dict"], (res) => {
+      const saved = res.arckchually_personal_dict || [];
+      dicoPersoSet = new Set(saved);
+      resolve();
     });
+  });
+}
+
+function ajouterAuDicoPerso(mot) {
+  const motClean = cleanWord(mot);
+  dicoPersoSet.add(motClean);
+  // Persistance
+  chrome.storage.local.set({
+    arckchually_personal_dict: Array.from(dicoPersoSet),
+  });
+  console.log(`[Arckchually] Mot ajouté au dico perso : ${mot}`);
 }
 
 /******************************************************
- *         GESTION DES CONTRACTIONS (APOSTROPHES)
+ * MORPHOLOGIE & VALIDATION AVANCÉE
  ******************************************************/
 
-/**
- * Enlève la contraction au début du mot (l', j', t', s', qu', etc.)
- * @param {string} word
- * @returns {string}
- */
 function removeLeadingApostrophe(word) {
-  // On tolère l’apostrophe ASCII ' ou typographique ’
   const match = word.match(/^(l|j|t|s|qu|c|n|m|d)(?:'|’)(.*)$/i);
-  if (match) {
-    return match[2];
-  }
-  return word;
+  return match ? match[2] : word;
 }
 
-/******************************************************
- *         MORPHOLOGIE (PLURIELS, CONJUGAISONS...)
- ******************************************************/
-
-/**
- * Renvoie les bases morphologiques d'un mot (pluriel, etc.)
- * @param {string} cw
- * @returns {string[]}
- */
+// Amélioration de la conjugaison (heuristique)
 function getMorphologicalBases(cw) {
-  const bases = [cw];
-  if (cw.endsWith("s") && cw.length > 2) {
-    bases.push(cw.slice(0, -1));
-  }
-  if (cw.endsWith("es") && cw.length > 3) {
-    bases.push(cw.slice(0, -2));
-  }
-  if (cw.endsWith("ent") && cw.length > 3) {
-    bases.push(cw.slice(0, -3));
-  }
-  if (cw.endsWith("iez") && cw.length > 3) {
-    bases.push(cw.slice(0, -3));
-  }
-  return Array.from(new Set(bases));
+  const bases = new Set([cw]);
+  const len = cw.length;
+
+  // Pluriels simples
+  if (cw.endsWith("s") && len > 3) bases.add(cw.slice(0, -1));
+  if (cw.endsWith("x") && len > 3) bases.add(cw.slice(0, -1));
+
+  // Conjugaisons 1er groupe & standards
+  if (cw.endsWith("es") && len > 3) bases.add(cw.slice(0, -2));
+  if (cw.endsWith("nt") && len > 4) bases.add(cw.slice(0, -2)); // aiment -> aime
+  if (cw.endsWith("ent") && len > 4) bases.add(cw.slice(0, -3)); // mangent -> mang
+  if (cw.endsWith("ons") && len > 4) bases.add(cw.slice(0, -3)); // mangeons -> mange
+  if (cw.endsWith("ez") && len > 3) bases.add(cw.slice(0, -2));
+  if (cw.endsWith("ais") && len > 4) bases.add(cw.slice(0, -3)); // aimais -> aim
+  if (cw.endsWith("ait") && len > 4) bases.add(cw.slice(0, -3));
+  if (cw.endsWith("ient") && len > 5) bases.add(cw.slice(0, -4)); // aimaient -> aim
+
+  // Féminin simple
+  if (cw.endsWith("e") && len > 3) bases.add(cw.slice(0, -1));
+
+  return Array.from(bases);
 }
 
-/**
- * Vérifie si un mot est valide (dictionnaireSet) en tenant compte des bases morphologiques + contractions
- * @param {string} motOriginal
- * @param {Set<string>} dicoSet
- * @returns {boolean}
- */
-function estMotValideAvecMorphologie(motOriginal, dicoSet) {
+function estMotValide(motOriginal) {
   const motNettoye = cleanWord(motOriginal);
+  if (!motNettoye || motNettoye.length < 2) return true; // Ignorer mots 1 lettre
 
-  // 1) Test direct
-  if (dicoSet.has(motNettoye)) return true;
+  // 1. Vérif Dico Perso
+  if (dicoPersoSet.has(motNettoye)) return true;
+
+  // 2. Vérif Dico Global
+  if (dictionnaireSet.has(motNettoye)) return true;
+
+  // 3. Morphologie (Pluriel, etc)
   const bases = getMorphologicalBases(motNettoye);
   for (const base of bases) {
-    if (dicoSet.has(base)) return true;
+    if (dictionnaireSet.has(base)) return true;
   }
 
-  // 2) Test sans la contraction (ex: j'aimerais -> aimerais)
+  // 4. Apostrophes
   const motSansContr = removeLeadingApostrophe(motNettoye);
   if (motSansContr !== motNettoye) {
-    if (dicoSet.has(motSansContr)) return true;
+    if (dictionnaireSet.has(motSansContr)) return true;
+    if (dicoPersoSet.has(motSansContr)) return true;
+    // Morphologie sur la partie sans apostrophe
     const basesContr = getMorphologicalBases(motSansContr);
     for (const base of basesContr) {
-      if (dicoSet.has(base)) return true;
+      if (dictionnaireSet.has(base)) return true;
     }
   }
 
@@ -262,24 +234,17 @@ function estMotValideAvecMorphologie(motOriginal, dicoSet) {
 }
 
 /******************************************************
- *         RECHERCHE DE SUGGESTION VIA LA BK-TREE
+ * RECHERCHE DE SUGGESTION
  ******************************************************/
 
-/**
- * Trouve la meilleure suggestion (distance ≤ DISTANCE_MAX) pour un mot
- * @param {string} motOriginal
- * @returns {string|null}
- */
 function trouverSuggestion(motOriginal) {
   const motNettoye = cleanWord(motOriginal);
   if (!bkTree || !dictionnaireSet) return null;
 
-  // Vérifier dans le cache
   if (suggestionsCache[motNettoye] !== undefined) {
     return suggestionsCache[motNettoye];
   }
 
-  // On cherche tous les mots de la BK-Tree à distance ≤ DISTANCE_MAX
   const resultats = [];
   rechercherBK(bkTree, motNettoye, DISTANCE_MAX, resultats);
 
@@ -288,9 +253,6 @@ function trouverSuggestion(motOriginal) {
     return null;
   }
 
-  // On peut choisir le mot le plus proche ou, en cas d'égalité,
-  // le plus fréquent. Ici, on se contente de prendre le 1er du tableau.
-  // On peut améliorer en classant par distance, ou en triant autrement.
   let meilleurMot = null;
   let meilleureDistance = Infinity;
 
@@ -299,126 +261,203 @@ function trouverSuggestion(motOriginal) {
     if (dist < meilleureDistance) {
       meilleureDistance = dist;
       meilleurMot = candidat;
-      if (dist === 0) break; // distance parfaite, on arrête
     }
   }
 
-  // Stocker dans le cache
-  if (meilleurMot && meilleureDistance <= DISTANCE_MAX) {
-    suggestionsCache[motNettoye] = meilleurMot;
-    return meilleurMot;
-  } else {
-    suggestionsCache[motNettoye] = null;
-    return null;
+  const res =
+    meilleurMot && meilleureDistance <= DISTANCE_MAX ? meilleurMot : null;
+  suggestionsCache[motNettoye] = res;
+  return res;
+}
+
+/******************************************************
+ * REMPLACEMENT INTELLIGENT (RICH TEXT)
+ ******************************************************/
+
+function corrigerDansElement(element, faute, correction) {
+  // 1. Cas INPUT / TEXTAREA
+  if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
+    const val = element.value;
+    // Remplacement simple (toutes les occurrences pour l'instant)
+    // Idéalement, on utiliserait selectionStart pour cibler le mot proche du curseur
+    const regex = new RegExp(`\\b${faute}\\b`, "gi");
+    // Attention : remplace toutes les occurrences du mot dans le champ
+    const newText = val.replace(regex, correction);
+
+    // Préservation curseur (approximative)
+    const oldStart = element.selectionStart;
+    element.value = newText;
+    element.selectionStart = element.selectionEnd = oldStart;
+
+    // Déclencher l'event 'input' pour que les sites (React/Vue) détectent le changement
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  // 2. Cas CONTENTEDITABLE (Gmail, etc.)
+  else if (element.isContentEditable) {
+    // Méthode un peu "brute" mais universelle : on récupère le HTML
+    // Attention : peut casser certains event listeners complexes, mais fonctionne pour du texte simple.
+    // Une méthode plus propre nécessite l'API Selection/Range complexe.
+
+    // Essai simple : Regex sur innerHTML (Risqué si le mot est une classe CSS, mais \b aide)
+    // Pour limiter la casse, on ne touche qu'au texte visible.
+
+    // Approche Focus : On essaie de remplacer là où est le focus ? Difficile depuis un clic popup.
+    // Approche Globale Simple :
+    const regex = new RegExp(`\\b${faute}\\b`, "gi");
+    if (element.innerHTML.match(regex)) {
+      // On utilise execCommand si possible (deprecated mais gère l'historique undo/redo)
+      // Mais execCommand insertText marche à la position du curseur.
+      // Ici on fait un replace global dans le HTML.
+      element.innerHTML = element.innerHTML.replace(regex, correction);
+      // Force update
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }
 }
 
 /******************************************************
- *            VERIFICATION DU TEXTE
+ * INTERFACE UI
  ******************************************************/
-
-/**
- * Découpe le texte en mots et détecte les erreurs
- * @param {string} texte
- * @param {Set<string>} dicoSet
- * @returns {Array<{wrong: string, suggestion: string|null}>}
- */
-function verifierTexte(texte, dicoSet) {
-  const tokens = texte.split(/\s+/);
-  const erreurs = [];
-  for (const token of tokens) {
-    const motNettoye = cleanWord(token);
-    if (!motNettoye) continue;
-    // Si le mot n'est pas reconnu, on propose une suggestion
-    if (!estMotValideAvecMorphologie(token, dicoSet)) {
-      const suggestion = trouverSuggestion(token);
-      erreurs.push({ wrong: token, suggestion });
-    }
-  }
-  return erreurs;
-}
-
-/******************************************************
- *                   POPUP
- ******************************************************/
-
-function escapeHtml(str) {
-  return str.replace(/[<>&"]/g, function(c) {
-    switch (c) {
-      case '<': return '&lt;';
-      case '>': return '&gt;';
-      case '&': return '&amp;';
-      case '"': return '&quot;';
-    }
-    return c;
-  });
-}
 
 function afficherPopupErreur(element, erreurs) {
   let popup = element._arckchuallyPopup;
+
   if (!popup) {
     popup = document.createElement("div");
-    popup.style.position = "fixed";
-    popup.style.backgroundColor = "yellow";
-    popup.style.border = "2px solid black";
-    popup.style.padding = "10px";
-    popup.style.borderRadius = "5px";
-    popup.style.boxShadow = "3px 3px 7px rgba(0,0,0,0.3)";
-    popup.style.zIndex = 999999;
-    popup.style.fontSize = "15px";
-    popup.style.maxWidth = "400px";
-    popup.style.whiteSpace = "pre-wrap";
-    popup.style.lineHeight = "1.2";
+    // Styles Modernes
+    Object.assign(popup.style, {
+      position: "fixed",
+      backgroundColor: "#ffffff",
+      border: "1px solid #e0e0e0",
+      borderRadius: "12px",
+      padding: "16px",
+      boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+      zIndex: "2147483647", // Max Z-index
+      fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+      fontSize: "14px",
+      width: "300px",
+      color: "#333",
+      transition: "opacity 0.2s ease, transform 0.2s ease",
+      opacity: "0",
+      transform: "translateY(10px)",
+    });
 
-    const topBar = document.createElement("div");
-    topBar.style.position = "relative";
-    topBar.style.height = "20px";
+    // Header
+    const header = document.createElement("div");
+    Object.assign(header.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: "10px",
+      borderBottom: "1px solid #f0f0f0",
+      paddingBottom: "8px",
+    });
+    header.innerHTML = `<strong style="font-size:15px">☝️🤓 Arckchually...</strong>`;
 
     const closeBtn = document.createElement("span");
-    closeBtn.textContent = "✖";
-    closeBtn.style.color = "red";
-    closeBtn.style.fontWeight = "bold";
-    closeBtn.style.cursor = "pointer";
-    closeBtn.style.position = "absolute";
-    closeBtn.style.top = "0";
-    closeBtn.style.right = "0";
-    closeBtn.dataset.action = "close-popup";
-    topBar.appendChild(closeBtn);
-
-    popup.appendChild(topBar);
-
-    const messageDiv = document.createElement("div");
-    messageDiv.dataset.role = "message";
-    messageDiv.style.marginTop = "5px";
-    popup.appendChild(messageDiv);
-
-    popup.addEventListener("click", (ev) => {
-      if (ev.target.dataset.action === "close-popup") {
-        supprimerPopupErreur(element);
-      }
+    closeBtn.textContent = "×";
+    Object.assign(closeBtn.style, {
+      cursor: "pointer",
+      fontSize: "22px",
+      color: "#999",
+      lineHeight: "16px",
     });
+    closeBtn.onclick = () => supprimerPopupErreur(element);
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    // Conteneur Liste
+    const listDiv = document.createElement("div");
+    listDiv.className = "arck-list";
+    popup.appendChild(listDiv);
 
     document.body.appendChild(popup);
     element._arckchuallyPopup = popup;
+
+    // Animation In
+    requestAnimationFrame(() => {
+      popup.style.opacity = "1";
+      popup.style.transform = "translateY(0)";
+    });
   }
 
-  const msgDiv = popup.querySelector("[data-role='message']");
-  if (!msgDiv) return;
+  const listDiv = popup.querySelector(".arck-list");
+  listDiv.innerHTML = "";
 
-  const lignes = [];
-  lignes.push("☝️🤓 Erm, arckchually…");
-  for (const e of erreurs) {
-    if (!e.suggestion) {
-      lignes.push(`  - Le mot « ${escapeHtml(e.wrong)} » n'existe pas ou n'est pas reconnu.`);
+  const erreursAffichees = erreurs.slice(0, 4); // Max 4 items
+
+  erreursAffichees.forEach((err) => {
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: "8px",
+      padding: "8px",
+      backgroundColor: "#f8f9fa",
+      borderRadius: "6px",
+    });
+
+    // Colonne texte
+    const textCol = document.createElement("div");
+    if (err.suggestion) {
+      textCol.innerHTML = `
+        <div style="color:#d63031; text-decoration:line-through; font-size:12px">${err.wrong}</div>
+        <div style="color:#00b894; font-weight:bold; cursor:pointer;" title="Cliquer pour corriger">👉 ${err.suggestion}</div>
+      `;
+      // Clic pour corriger
+      textCol.onclick = () => {
+        corrigerDansElement(element, err.wrong, err.suggestion);
+        // Supprimer visuellement la ligne
+        row.remove();
+        if (listDiv.children.length === 0) supprimerPopupErreur(element);
+      };
     } else {
-      lignes.push(`  - C'est « ${escapeHtml(e.suggestion)} », pas « ${escapeHtml(e.wrong)} ».`);
+      textCol.innerHTML = `<div style="color:#d63031; font-weight:bold">${err.wrong} ?</div>`;
     }
-  }
-  msgDiv.innerHTML = lignes.join("<br/>");
 
+    // Bouton Ignorer (+)
+    const ignoreBtn = document.createElement("button");
+    ignoreBtn.textContent = "+";
+    ignoreBtn.title = "Ajouter au dictionnaire personnel";
+    Object.assign(ignoreBtn.style, {
+      border: "none",
+      background: "transparent",
+      color: "#b2bec3",
+      fontSize: "18px",
+      cursor: "pointer",
+      marginLeft: "10px",
+    });
+    ignoreBtn.onmouseover = () => (ignoreBtn.style.color = "#0984e3");
+    ignoreBtn.onmouseout = () => (ignoreBtn.style.color = "#b2bec3");
+
+    ignoreBtn.onclick = (e) => {
+      e.stopPropagation();
+      ajouterAuDicoPerso(err.wrong);
+      row.style.opacity = "0.3"; // Feedback visuel
+      setTimeout(() => row.remove(), 500);
+    };
+
+    row.appendChild(textCol);
+    row.appendChild(ignoreBtn);
+    listDiv.appendChild(row);
+  });
+
+  if (erreurs.length > 4) {
+    const more = document.createElement("div");
+    more.textContent = `+ ${erreurs.length - 4} autres...`;
+    more.style.fontSize = "11px";
+    more.style.color = "#aaa";
+    more.style.textAlign = "center";
+    listDiv.appendChild(more);
+  }
+
+  // Positionnement intelligent
   const rect = element.getBoundingClientRect();
-  popup.style.top = (rect.bottom + 5) + "px";
-  popup.style.left = rect.left + "px";
+  const topPos = rect.bottom + window.scrollY + 5;
+  const leftPos = rect.left + window.scrollX;
+  popup.style.top = topPos + "px";
+  popup.style.left = leftPos + "px";
 }
 
 function supprimerPopupErreur(element) {
@@ -429,35 +468,96 @@ function supprimerPopupErreur(element) {
 }
 
 /******************************************************
- *             INITIALISATION GLOBALE
+ * MOTEUR PRINCIPAL
  ******************************************************/
 
-let timerDebounce = null;
+function traiterSaisie(element) {
+  if (!dictionnaireCharge) return;
 
-chargerDictionnaire().then(() => {
-  // Écouteur principal pour la saisie
-  document.addEventListener("input", (e) => {
-    const element = e.target;
-    if (
-      element.tagName === "INPUT" ||
-      element.tagName === "TEXTAREA" ||
-      element.isContentEditable
-    ) {
-      if (timerDebounce) clearTimeout(timerDebounce);
-      timerDebounce = setTimeout(() => {
-        const texte = element.value !== undefined ? element.value : element.innerText;
-        const erreurs = verifierTexte(texte, dictionnaireSet);
-        if (erreurs.length > 0) {
-          afficherPopupErreur(element, erreurs);
-        } else {
-          supprimerPopupErreur(element);
-        }
-      }, DELAI_DEBOUNCE);
+  // Récupération texte
+  let texte = "";
+  if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
+    texte = element.value;
+  } else if (element.isContentEditable) {
+    texte = element.innerText; // innerText respecte mieux les retours à la ligne que textContent
+  }
+
+  if (!texte || !texte.trim()) {
+    supprimerPopupErreur(element);
+    return;
+  }
+
+  // Analyse
+  const tokens = texte.split(/\s+/);
+  const erreurs = [];
+
+  // Utiliser un Set pour éviter les doublons dans l'affichage
+  const erreursVues = new Set();
+
+  for (const token of tokens) {
+    const motClean = cleanWord(token);
+    if (!motClean || motClean.length < 2) continue;
+
+    if (!estMotValide(token)) {
+      if (!erreursVues.has(motClean)) {
+        const suggestion = trouverSuggestion(token);
+        erreurs.push({ wrong: token, suggestion });
+        erreursVues.add(motClean);
+      }
     }
-  }, true);
+  }
 
-  // Écouteur pour enlever la popup au blur
-  document.addEventListener("blur", (e) => {
-    supprimerPopupErreur(e.target);
-  }, true);
+  if (erreurs.length > 0) {
+    afficherPopupErreur(element, erreurs);
+  } else {
+    supprimerPopupErreur(element);
+  }
+}
+
+/******************************************************
+ * INITIALISATION
+ ******************************************************/
+
+initialiserTout().then(() => {
+  document.addEventListener(
+    "input",
+    (e) => {
+      const el = e.target;
+      if (
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.isContentEditable
+      ) {
+        if (timerDebounce) clearTimeout(timerDebounce);
+        timerDebounce = setTimeout(() => traiterSaisie(el), DELAI_DEBOUNCE);
+      }
+    },
+    true
+  );
+
+  // Clic en dehors pour fermer
+  document.addEventListener(
+    "click",
+    (e) => {
+      // Si on clique quelque part qui n'est pas le popup ni l'input
+      // On ferme les popups existants (simplification)
+      // (L'idéal serait de gérer par élément actif)
+    },
+    true
+  );
+
+  document.addEventListener(
+    "blur",
+    (e) => {
+      // Délai pour permettre le clic sur le bouton "Corriger" ou "+" du popup
+      setTimeout(() => {
+        const activeEl = document.activeElement;
+        // Si le focus n'est pas passé dans le popup (difficile à détecter car popup est div)
+        // On laisse l'utilisateur fermer avec la croix ou on attend une nouvelle saisie
+        // Pour cette version UX : on laisse la popup visible un peu plus longtemps ou jusqu'à la croix
+        // supprimerPopupErreur(e.target); <--- Désactivé pour permettre le clic sur les boutons
+      }, 200);
+    },
+    true
+  );
 });
